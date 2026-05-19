@@ -3,106 +3,222 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\BackupLog;
 
 class BackupController extends Controller
 {
-    // Show backup page
-    public function index()
+    // Show Page
+    public function index(Request $request)
     {
         $backupPath = storage_path('app/backups');
 
-        // Ensure folder exists
         if (!file_exists($backupPath)) {
             mkdir($backupPath, 0777, true);
         }
 
-        // Get all SQL files
         $files = glob($backupPath . '/*.sql');
 
-        // Extract filenames
-        $backups = array_map(function ($file) {
-            return basename($file);
-        }, $files);
+        $search = $request->search;
 
-        return view('backup.index', compact('backups'));
+        $backups = collect($files)->map(function ($file) {
+
+            return [
+                'name' => basename($file),
+                'size' => round(filesize($file) / 1024, 2),
+                'date' => date("d M Y h:i A", filemtime($file)),
+                'timestamp' => filemtime($file),
+            ];
+
+        })->filter(function ($backup) use ($search) {
+
+            if (!$search) {
+                return true;
+            }
+
+            return str_contains(
+                strtolower($backup['name']),
+                strtolower($search)
+            );
+
+        })->sortByDesc('timestamp')->values();
+
+        // PAGINATION
+        $perPage = 4;
+
+        $currentPage = request()->get('page', 1);
+
+        $pagedData = $backups->slice(
+            ($currentPage - 1) * $perPage,
+            $perPage
+        )->values();
+
+        $backups = new \Illuminate\Pagination\LengthAwarePaginator(
+            $pagedData,
+            $backups->count(),
+            $perPage,
+            $currentPage,
+            [
+                'path' => request()->url(),
+                'query' => request()->query(),
+            ]
+        );
+
+        $totalBackups = collect($files)->count();
+
+        $totalStorage = round(
+            collect($files)->sum(fn($file) => filesize($file)) / 1024 / 1024,
+            2
+        );
+
+        return view('backup.index', compact(
+            'backups',
+            'totalBackups',
+            'totalStorage'
+        ));
     }
 
-    // Create backup
+    // Create Backup
     public function createBackup()
     {
+        $backupPath = storage_path('app/backups');
+
+        // Create folder if not exists
+        if (!file_exists($backupPath)) {
+            mkdir($backupPath, 0777, true);
+        }
+
+        // Backup filename
         $filename = 'backup-' . date('Y-m-d_H-i-s') . '.sql';
-        $path = storage_path("app/backups/{$filename}");
+
+        $path = $backupPath . '/' . $filename;
+
+        // Database config
+        $dbHost = env('DB_HOST');
+        $dbPort = env('DB_PORT');
+        $dbUser = env('DB_USERNAME');
+        $dbPass = env('DB_PASSWORD');
+        $dbName = env('DB_DATABASE');
+
+        // XAMPP mysqldump path
+        $mysqldump = "C:/xampp/mysql/bin/mysqldump.exe";
+
+        // Command
+        $command = "\"{$mysqldump}\" --host={$dbHost} --port={$dbPort} --user={$dbUser} {$dbName} > \"{$path}\"";
+
+        // Add password if exists
+        if (!empty($dbPass)) {
+            $command = "\"{$mysqldump}\" --host={$dbHost} --port={$dbPort} --user={$dbUser} --password={$dbPass} {$dbName} > \"{$path}\"";
+        }
+
+        // Execute
+        system($command, $result);
+
+        // Check success
+        if ($result === 0 && file_exists($path) && filesize($path) > 0) {
+
+            BackupLog::create([
+                'file_name' => $filename,
+                'file_size' => round(filesize($path) / 1024, 2) . ' KB',
+                'status' => 'Success'
+            ]);
+
+            return back()->with(
+                'success',
+                'Backup Created Successfully'
+            );
+        }
+
+        // Delete empty file
+        if (file_exists($path)) {
+            unlink($path);
+        }
+
+        return back()->with(
+            'error',
+            'Backup Failed'
+        );
+    }
+    // Download Backup
+    public function downloadBackup($file)
+    {
+        $filePath = storage_path('app/backups/' . $file);
+
+        if (!file_exists($filePath)) {
+            return back()->with('error', 'File not found');
+        }
+
+        return response()->download($filePath);
+    }
+
+    // Delete Backup
+    public function deleteBackup($file)
+    {
+        $filePath = storage_path('app/backups/' . $file);
+
+        if (file_exists($filePath)) {
+
+            unlink($filePath);
+
+            BackupLog::where('file_name', $file)->delete();
+
+            return back()->with(
+                'success',
+                'Backup Deleted Successfully'
+            );
+        }
+
+        return back()->with(
+            'error',
+            'File Not Found'
+        );
+    }
+
+    // Restore Backup
+    public function restoreBackup(Request $request)
+    {
+        $request->validate([
+            'backup_file' => 'required|string'
+        ]);
+
+        $filePath = storage_path(
+            'app/backups/' . $request->backup_file
+        );
+
+        if (!file_exists($filePath)) {
+            return back()->with(
+                'error',
+                'Backup file not found'
+            );
+        }
 
         $dbHost = env('DB_HOST');
         $dbUser = env('DB_USERNAME');
         $dbPass = env('DB_PASSWORD');
         $dbName = env('DB_DATABASE');
 
-        // XAMPP mysqldump path
-        $mysqldumpPath = 'C:\\xampp\\mysql\\bin\\mysqldump.exe';
+        $mysqlPath = 'C:\\xampp\\mysql\\bin\\mysql.exe';
 
-        $command = "\"{$mysqldumpPath}\" -h {$dbHost} -u {$dbUser} ";
+        $command = "\"{$mysqlPath}\" -h {$dbHost} -u {$dbUser} ";
+
         $command .= $dbPass ? "-p{$dbPass} " : "";
-        $command .= "{$dbName} > \"{$path}\"";
 
-        $returnVar = null;
-        $output = null;
+        $command .= "{$dbName} < \"{$filePath}\"";
+
+        $command = 'cmd /c ' . $command;
+
         exec($command, $output, $returnVar);
 
         if ($returnVar === 0) {
-            return back()->with('success', "Backup created: {$filename}");
-        } else {
-            return back()->with('error', 'Backup failed. Check DB credentials, folder permissions, or mysqldump path.');
-        }
-    }
 
-    // Download backup
-    public function downloadBackup($file)
-    {
-        $filePath = storage_path('app/backups/' . $file);
-
-        if (!file_exists($filePath)) {
-            return back()->with('error', 'File not found.');
+            return back()->with(
+                'success',
+                'Database Restored Successfully'
+            );
         }
 
-        return response()->download($filePath);
+        return back()->with(
+            'error',
+            'Restore Failed'
+        );
     }
-
-    // Restore backup
-  public function restoreBackup(Request $request)
-{
-    $request->validate([
-        'backup_file' => 'required|string'
-    ]);
-
-    $filePath = storage_path('app/backups/' . $request->backup_file);
-
-    if (!file_exists($filePath)) {
-        return back()->with('error', 'Backup file not found.');
-    }
-
-    $dbHost = env('DB_HOST');
-    $dbUser = env('DB_USERNAME');
-    $dbPass = env('DB_PASSWORD');
-    $dbName = env('DB_DATABASE');
-
-    //  Correct MySQL path
-    $mysqlPath = 'C:\\xampp\\mysql\\bin\\mysql.exe';
-
-    //  FINAL WORKING COMMAND
-    $command = "\"{$mysqlPath}\" -h {$dbHost} -u {$dbUser} ";
-    $command .= $dbPass ? "-p{$dbPass} " : "";
-    $command .= "{$dbName} < \"{$filePath}\"";
-
-    //  VERY IMPORTANT for Windows
-    $command = 'cmd /c ' . $command;
-
-    exec($command, $output, $returnVar);
-
-    if ($returnVar === 0) {
-        return back()->with('success', 'Database restored successfully.');
-    } else {
-        return back()->with('error', 'Database restore failed. Try again.');
-    }
-}
 }
