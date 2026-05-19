@@ -492,5 +492,8 @@ PHP_Laravel12_BackUP_Restore/
 ---
 
 Your PHP_Laravel12_BackUP_Restore Project is now ready!
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> development
