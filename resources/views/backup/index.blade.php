@@ -63,16 +63,17 @@
     <div class="max-w-7xl mx-auto">
 
         <!-- Header -->
-        <div class="text-center mb-10">
+        <div class="text-center mb-6">
+            <h1 class="text-4xl font-bold mb-2">🚀 Advanced Backup Dashboard</h1>
+            <p class="text-slate-400">Laravel 12 Backup & Restore Management System</p>
+        </div>
 
-            <h1 class="text-4xl font-bold mb-2">
-                🚀 Advanced Backup Dashboard
-            </h1>
-
-            <p class="text-slate-400">
-                Laravel 12 Backup & Restore Management System
-            </p>
-
+        <!-- Nav Tabs -->
+        <div class="flex gap-3 mb-8 flex-wrap justify-center">
+            <a href="{{ route('backup.index') }}" class="bg-blue-600 px-4 py-2 rounded-lg text-sm">🏠 Dashboard</a>
+            <a href="{{ route('backup.settings') }}" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm transition">⚙️ Settings</a>
+            <a href="{{ route('backup.cloud') }}" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm transition">☁️ Cloud Config</a>
+            <a href="{{ route('backup.validate') }}" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm transition">🧪 Validator</a>
         </div>
 
         <!-- Alerts -->
